@@ -103,53 +103,52 @@ def do_infer(model, audio, chunk_factor, sr, stream):
 
 
 def main():
+    # CLI args
     parser = argparse.ArgumentParser()
-    parser.add_argument('--checkpoint_path', '-p', type=str,
-                        default='llvc_models/models/checkpoints/llvc/G_500000.pth', help='Path to LLVC checkpoint file')
-    parser.add_argument('--config_path', '-c', type=str,
-                        default='experiments/llvc/config.json', help='Path to LLVC config file')
-    parser.add_argument('--fname', '-f', type=str,
-                        default='test_wavs', help='Path to audio file or directory of audio files to convert')
-    parser.add_argument('--out_dir', '-o', type=str,
-                        default='converted_out', help='Directory to save converted audio')
-    parser.add_argument('--chunk_factor', '-n', type=int,
-                        default=1, help='Chunk factor for streaming inference')
-    parser.add_argument('--stream', '-s', action='store_true',
-                        help='Use streaming inference')
+    parser.add_argument('--checkpoint_path', '-p', type=str, default='llvc_models/models/checkpoints/llvc/G_500000.pth', help='Path to LLVC checkpoint file')
+    parser.add_argument('--config_path',     '-c', type=str, default='experiments/llvc/config.json',                     help='Path to LLVC config file')
+    parser.add_argument('--fname',           '-f', type=str, default='test_wavs',                                        help='Path to audio file or directory of audio files to convert')
+    parser.add_argument('--out_dir',         '-o', type=str, default='converted_out',                                    help='Directory to save converted audio')
+    parser.add_argument('--chunk_factor',    '-n', type=int, default=1,                                                  help='Chunk factor for streaming inference')
+    parser.add_argument('--stream',          '-s', action='store_true',                                                  help='Use streaming inference')
     args = parser.parse_args()
+
     model, sr = load_model(args.checkpoint_path, args.config_path)
+
     if not os.path.exists(args.out_dir):
         os.mkdir(args.out_dir)
-    # check if fname is a directory
+
+    # Multiple audios
     if os.path.isdir(args.fname):
         if not os.path.exists(args.out_dir):
             os.mkdir(args.out_dir)
-        # recursively glob wav files
-        rtf_list = []
+        rtf_list, e2e_times_list = [], [] # LLRT Stats
         fnames = glob_audio_files(args.fname)
-        e2e_times_list = []
         for fname in tqdm(fnames):
+            # Load
             audio = load_audio(fname, sr)
-            out, rtf_, e2e_latency_ = do_infer(
-                model, audio, args.chunk_factor, sr, args.stream
-            )
+            # Run
+            out, rtf_, e2e_latency_ = do_infer(model, audio, args.chunk_factor, sr, args.stream)
+            # Save
             rtf_list.append(rtf_)
             e2e_times_list.append(e2e_latency_)
-            out_fname = os.path.join(args.out_dir, os.path.basename(fname))
-            save_audio(out, out_fname, sr)
+            save_audio(out, os.path.join(args.out_dir, os.path.basename(fname)), sr)
+        # Save stats
         rtf = np.mean(rtf_list) if rtf_list[0] is not None else None
-        e2e_latency = np.mean(
-            e2e_times_list) if e2e_times_list[0] is not None else None
+        e2e_latency = np.mean(e2e_times_list) if e2e_times_list[0] is not None else None
         print(f"Saved outputs to {args.out_dir}")
+
+    # Single audio
     else:
+        # Load
         audio = load_audio(args.fname, sr)
-        out, rtf, e2e_latency = do_infer(
-            model, audio, args.chunk_factor, sr, args.stream
-        )
-        out_fname = os.path.join(
-            args.out_dir, os.path.basename(args.fname))
-        save_audio(out, out_fname, sr)
+        # Run
+        out, rtf, e2e_latency = do_infer(model, audio, args.chunk_factor, sr, args.stream)
+        # Save
+        save_audio(out, os.path.join(args.out_dir, os.path.basename(args.fname)), sr)
         print(f"Saved output to {args.out_dir}")
+
+    # Reporting - LLRT metrics
     if rtf is not None and e2e_latency is not None:
         print(f"RTF: {rtf:.3f}")
         print(f"End-to-end latency: {e2e_latency:.3f}ms")
